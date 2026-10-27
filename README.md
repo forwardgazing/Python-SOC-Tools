@@ -15,3 +15,7 @@
 **Запуск:**
 ```bash
 python log_analyzer.py
+## 📸 Пример работы скрипта `log_analyzer.py`
+Скрипт автоматически извлекает внешние IP-адреса из логов, фильтрует локальные (серые) IP и формирует CSV-отчет для последующей проверки через Threat Intelligence.
+
+![Результат работы скрипта log_analyzer](images/python_log_analyzer.png)
