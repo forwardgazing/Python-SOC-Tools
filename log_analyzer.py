@@ -1,72 +1,61 @@
 import re
-import argparse
-import json
+import csv
+import ipaddress
 from collections import Counter
-import os
 
-def extract_ips_from_log(file_path):
-    """
-    Читает файл с логами и извлекает все IPv4 адреса.
-    """
-    # Более строгое регулярное выражение для поиска валидных IPv4 адресов
-    ip_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
+def extract_ips(file_path):
+    """Читает файл и достает все IPv4 адреса"""
+    ip_pattern = r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
     extracted_ips = []
-
-    if not os.path.exists(file_path):
-        print(f"[-] Ошибка: Файл {file_path} не найден.")
-        return []
-
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
             for line in file:
                 found_ips = re.findall(ip_pattern, line)
                 extracted_ips.extend(found_ips)
-    except Exception as e:
-        print(f"[-] Ошибка при чтении файла: {e}")
+    except FileNotFoundError:
+        print(f"Ошибка: Файл {file_path} не найден.")
         return []
-
     return extracted_ips
 
-def analyze_logs(file_path, top_n=5, output_json=False):
-    """
-    Анализирует логи, выводит топ IP и опционально сохраняет в JSON.
-    """
-    print(f"[*] Начинаю анализ файла: {file_path}")
-    ips = extract_ips_from_log(file_path)
+def filter_external_ips(ips):
+    """Оставляет только внешние (белые) IP, отсеивая локальные (серые)"""
+    external_ips = []
+    for ip in ips:
+        try:
+            ip_obj = ipaddress.ip_address(ip)
+            # Если IP не является локальным (private), добавляем его
+            if not ip_obj.is_private and not ip_obj.is_loopback:
+                external_ips.append(ip)
+        except ValueError:
+            continue
+    return external_ips
 
-    if not ips:
-        print("[-] IP-адреса в логах не найдены.")
+def analyze_and_export(file_path, output_csv="suspicious_ips.csv"):
+    """Анализирует логи и сохраняет отчет в CSV"""
+    print(f"--- Анализ логов: {file_path} ---")
+    
+    all_ips = extract_ips(file_path)
+    external_ips = filter_external_ips(all_ips)
+    
+    if not external_ips:
+        print("Внешних IP-адресов не найдено.")
         return
 
-    ip_counts = Counter(ips)
+    ip_counts = Counter(external_ips)
     
-    print(f"[+] Всего найдено уникальных IP-адресов: {len(ip_counts)}")
-    print(f"[+] Топ-{top_n} самых частых IP (возможный брутфорс):")
-    
-    top_ips = ip_counts.most_common(top_n)
-    for ip, count in top_ips:
-        print(f"    -> IP: {ip:15} | Встречается: {count} раз(а)")
-
-    # Сохранение отчета в JSON
-    if output_json:
-        # Сохраняем ВСЕ найденные IP с их количеством, а не только топ-5
-        report_data = dict(ip_counts) 
-        report_filename = "scan_report.json"
+    # Записываем в CSV для Excel
+    with open(output_csv, mode='w', newline='', encoding='utf-8-sig') as file:
+        writer = csv.writer(file, delimiter=';')
+        writer.writerow(['IP-адрес', 'Количество вхождений'])
         
-        try:
-            with open(report_filename, 'w', encoding='utf-8') as f:
-                json.dump(report_data, f, indent=4, ensure_ascii=False)
-            print(f"\n[+] Отчет успешно сохранен в файл: {report_filename}")
-        except Exception as e:
-            print(f"[-] Не удалось сохранить JSON: {e}")
+        print(f"Найдено уникальных внешних IP: {len(ip_counts)}")
+        print("Топ подозрительных IP (сохранены в CSV):")
+        
+        for ip, count in ip_counts.most_common():
+            print(f" -> {ip} | Встречается {count} раз")
+            writer.writerow([ip, count])
+            
+    print(f"\nОтчет сохранен в файл: {output_csv}")
 
 if __name__ == "__main__":
-    # Настройка аргументов командной строки (CLI)
-    parser = argparse.ArgumentParser(description="Python-утилита для поиска IP-адресов в логах (SOC L1 Tool)")
-    parser.add_argument("-f", "--file", required=True, help="Путь к файлу с логами")
-    parser.add_argument("-n", "--top", type=int, default=5, help="Сколько топ-IP показать (по умолчанию 5)")
-    parser.add_argument("-j", "--json", action="store_true", help="Сохранить результат в JSON файл")
-    
-    args = parser.parse_args()
-    
-    analyze_logs(args.file, args.top, args.json)
+    analyze_and_export("sample_auth.log")
